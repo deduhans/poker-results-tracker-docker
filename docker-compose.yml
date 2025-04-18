@@ -1,0 +1,99 @@
+# Docker Compose configuration for Poker Results Tracker
+services:
+  # Backend NestJS application
+  nestapp:
+    container_name: poker-nestapp
+    build:
+      context: ./poker-results-tracker-be
+      dockerfile: Dockerfile
+      # Use buildkit for faster builds
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    ports:
+      - "3000:3000"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_NAME=${POSTGRES_NAME:-postgres}
+      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=poker-postgres
+      - NEST_HOST=0.0.0.0
+      - NEST_PORT=3000
+      - CLIENT_HOST=0.0.0.0
+      - CLIENT_PORT=80
+      - PASSPORT_SECRET=${PASSPORT_SECRET:-localsecret}
+      - NODE_ENV=production
+    env_file:
+      - ./poker-results-tracker-be/.env.docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - poker-network
+    restart: unless-stopped
+    # Simplified healthcheck for the backend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Frontend Vue.js application with Caddy
+  vueapp:
+    container_name: poker-vueapp
+    build:
+      context: ./poker-results-tracker-fe
+      dockerfile: Dockerfile
+      # Use buildkit for faster builds
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    ports:
+      - "80:80"
+    env_file:
+      - ./poker-results-tracker-fe/.env.docker
+    depends_on:
+      nestapp:
+        condition: service_healthy
+    networks:
+      - poker-network
+    restart: unless-stopped
+    volumes:
+      - ./poker-results-tracker-fe/Caddyfile:/etc/caddy/Caddyfile
+    # Simplified healthcheck for the frontend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # PostgreSQL database
+  postgres:
+    container_name: poker-postgres
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_DB=${POSTGRES_NAME:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - poker-network
+    # Add healthcheck for the database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  poker-network:
+    driver: bridge
+
+volumes:
+  pgdata:
